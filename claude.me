@@ -15,6 +15,10 @@ De applicatie is opgebouwd uit de volgende modules:
 ### app.py
 - **Functionaliteit**: Hoofdbestand dat de applicatie start en initialiseert
 - **Belangrijkste functies**:
+  - `configure_logging(app)`: Configureert de logging voor de applicatie
+    - Parameters: app (Flask app instance)
+    - Return: Void
+    - Afhankelijkheden: logging, os
   - `main()`: Start de Flask webserver en initialiseert de benodigde modules
     - Parameters: Geen
     - Return: Void
@@ -44,9 +48,13 @@ De applicatie is opgebouwd uit de volgende modules:
     - Return: JSON response met status en bestandspad
     - Afhankelijkheden: recorder.py, file_handler.py
   - `api_transcribe()`: API endpoint om een audio bestand te transcriberen
-    - Parameters: audio_file (via JSON request)
+    - Parameters: audio_file (via JSON request), language (optioneel)
     - Return: JSON response met transcriptie tekst en bestandspad
     - Afhankelijkheden: transcriber.py, file_handler.py
+  - `api_languages()`: API endpoint om ondersteunde talen op te halen
+    - Parameters: Geen
+    - Return: JSON response met ondersteunde talen
+    - Afhankelijkheden: transcriber.py
 
 ### modules/recorder.py
 - **Functionaliteit**: Verzorgt het opnemen van audio via de microfoon
@@ -112,18 +120,18 @@ De applicatie is opgebouwd uit de volgende modules:
   - Recorder module (Issue #2)
   - File handler module
   - Transcriber module (Issue #3)
-  - Integratie tests (Issue #4 gedeeltelijk)
+  - Integratie tests en bugfixes (Issue #4)
   
 - **In ontwikkeling**:
-  - Integratie testen en bugfixes (Issue #4)
+  - UI/UX verbeteringen (Issue #6)
   
 - **Nog te implementeren**:
-  - Verbeteringen UI/UX
   - Ondersteuning voor verschillende talen
   - Upload functionaliteit voor bestaande audiobestanden
 
 ## 5. Volgende stappen
-1. Afronden van integratie testen en bugfixes (Issue #4)
-2. UI/UX verbeteringen
-3. Implementeren van meertalenondersteuning voor transcriptie
-4. Toevoegen van upload functionaliteit voor bestaande audiobestanden
+1. Implementeren van UI/UX verbeteringen (Issue #6)
+2. Uitbreiden van meertalenondersteuning voor transcriptie
+3. Toevoegen van upload functionaliteit voor bestaande audiobestanden
+4. Toevoegen van configuratiescherm voor gebruikersinstellingen
+5. Implementeren van bewerkmogelijkheden voor transcripties
