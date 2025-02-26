@@ -19,6 +19,10 @@ De applicatie is opgebouwd uit de volgende modules:
     - Parameters: Geen
     - Return: Void
     - Afhankelijkheden: Alle andere modules
+  - `create_app()`: Creëert en configureert de Flask applicatie
+    - Parameters: Geen
+    - Return: Flask applicatie-instantie
+    - Afhankelijkheden: Flask, web_interface module
 
 ### modules/web_interface.py
 - **Functionaliteit**: Verzorgt de web-GUI en API-endpoints
@@ -27,10 +31,22 @@ De applicatie is opgebouwd uit de volgende modules:
     - Parameters: app (Flask app instance)
     - Return: Void
     - Afhankelijkheden: Flask
-  - `get_available_devices()`: Haalt beschikbare audio input-apparaten op
+  - `get_devices()`: API endpoint om beschikbare audio-apparaten op te halen
     - Parameters: Geen
-    - Return: List (lijst met beschikbare audioapparaten)
+    - Return: JSON response met lijst van apparaten
     - Afhankelijkheden: recorder.py
+  - `api_start_recording()`: API endpoint om een opname te starten
+    - Parameters: device_id (via JSON request)
+    - Return: JSON response met status
+    - Afhankelijkheden: recorder.py
+  - `api_stop_recording()`: API endpoint om een opname te stoppen
+    - Parameters: Geen
+    - Return: JSON response met status en bestandspad
+    - Afhankelijkheden: recorder.py, file_handler.py
+  - `api_transcribe()`: API endpoint om een audio bestand te transcriberen
+    - Parameters: audio_file (via JSON request)
+    - Return: JSON response met transcriptie tekst en bestandspad
+    - Afhankelijkheden: transcriber.py, file_handler.py
 
 ### modules/recorder.py
 - **Functionaliteit**: Verzorgt het opnemen van audio via de microfoon
@@ -81,12 +97,25 @@ De applicatie is opgebouwd uit de volgende modules:
     - Afhankelijkheden: Geen
 
 ## 4. Status
-- Alle modules moeten nog geïmplementeerd worden
+- **Voltooid**:
+  - Basis projectstructuur (Issue #1)
+  - HTML/CSS/JavaScript frontend basis
+  - Flask applicatie setup
+  
+- **In ontwikkeling**:
+  - Recorder module (Issue #2)
+  - Transcriber module (Issue #3)
+  
+- **Nog te implementeren**:
+  - File handler module
+  - Integratie testing
+  - Verbeteringen UI/UX
+  - Ondersteuning voor verschillende talen
+  - Upload functionaliteit voor bestaande audiobestanden
 
 ## 5. Volgende stappen
-1. Opzetten van de basis project structuur
-2. Implementeren van de recorder module
-3. Implementeren van de transcriber module
-4. Implementeren van de file_handler module
-5. Ontwikkelen van de web interface
-6. Integratie testen en bugfixes
+1. Implementeren van de recorder module (Issue #2)
+2. Implementeren van de transcriber module (Issue #3)
+3. Afmaken van de file_handler module
+4. Integratie testen en bugfixes
+5. UI/UX verbeteringen
