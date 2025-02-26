@@ -1,12 +1,13 @@
 # Record en Transcribe App
 
 ## 1. Projectoverzicht
-Een Python- en webapplicatie waarmee gebruikers gesprekken kunnen opnemen via een microfoon en deze kunnen omzetten naar geschreven tekst (transcriptie). De applicatie biedt een web-GUI waarin de gebruiker een microfoon kan selecteren, opnames kan starten en stoppen, en vervolgens kan kiezen of de opname direct getranscribeerd moet worden.
+Een Python- en webapplicatie waarmee gebruikers gesprekken kunnen opnemen via een microfoon en deze kunnen omzetten naar geschreven tekst (transcriptie). De applicatie biedt een web-GUI waarin de gebruiker een microfoon kan selecteren, opnames kan starten en stoppen, en vervolgens kan kiezen of de opname direct getranscribeerd moet worden. Daarnaast kunnen gebruikers ook bestaande audiobestanden uploaden en laten transcriberen in verschillende formaten.
 
 ## 2. Architectuur
 De applicatie is opgebouwd uit de volgende modules:
 - Web interface (Flask)
 - Audio opname module
+- Audio upload en verwerking module
 - Transcriptie module
 - Bestandsbeheer module
 
@@ -55,6 +56,14 @@ De applicatie is opgebouwd uit de volgende modules:
     - Parameters: Geen
     - Return: JSON response met ondersteunde talen
     - Afhankelijkheden: transcriber.py
+  - `api_upload_audio()`: API endpoint om audiobestanden te uploaden
+    - Parameters: audio_file (via multipart form data)
+    - Return: JSON response met uploadstatus en bestandspad
+    - Afhankelijkheden: file_handler.py
+  - `api_audio_formats()`: API endpoint om ondersteunde audioformaten op te halen
+    - Parameters: Geen
+    - Return: JSON response met ondersteunde formaten en maximale bestandsgrootte
+    - Afhankelijkheden: file_handler.py, transcriber.py
 
 ### modules/recorder.py
 - **Functionaliteit**: Verzorgt het opnemen van audio via de microfoon
@@ -82,11 +91,11 @@ De applicatie is opgebouwd uit de volgende modules:
   - `transcribe_audio(audio_file, language)`: Transcribeert een audiobestand naar tekst
     - Parameters: audio_file (str, pad naar het audiobestand), language (str, optioneel)
     - Return: str (getranscribeerde tekst)
-    - Afhankelijkheden: SpeechRecognition
+    - Afhankelijkheden: SpeechRecognition, file_handler.py
   - `transcribe_with_options(audio_file, options)`: Transcribeert met uitgebreide opties
     - Parameters: audio_file (str), options (dict, optioneel)
     - Return: dict (transcriptieresultaten en metadata)
-    - Afhankelijkheden: SpeechRecognition
+    - Afhankelijkheden: SpeechRecognition, file_handler.py
   - `save_transcription(text, filename)`: Slaat de transcriptie op als een tekstbestand
     - Parameters: text (str), filename (str)
     - Return: str (pad naar het opgeslagen bestand)
@@ -95,11 +104,15 @@ De applicatie is opgebouwd uit de volgende modules:
     - Parameters: Geen
     - Return: dict (taalcodes en -namen)
     - Afhankelijkheden: Geen
+  - `get_supported_audio_formats()`: Geeft een lijst van ondersteunde audioformaten
+    - Parameters: Geen
+    - Return: List (ondersteunde bestandsextensies)
+    - Afhankelijkheden: file_handler.py
 
 ### modules/file_handler.py
 - **Functionaliteit**: Verzorgt het bestandsbeheer voor opnames en transcripties
 - **Belangrijkste functies**:
-  - `get_download_folder()`: Bepaalt de standaard download-map van de browser
+  - `get_download_folder()`: Bepaalt de standaard download-map
     - Parameters: Geen
     - Return: str (pad naar de download-map)
     - Afhankelijkheden: Geen
@@ -110,6 +123,18 @@ De applicatie is opgebouwd uit de volgende modules:
   - `load_file(filepath)`: Laadt een bestand van schijf
     - Parameters: filepath (str)
     - Return: bytes of str (inhoud van het bestand)
+    - Afhankelijkheden: Geen
+  - `validate_audio_file(file, filename)`: Valideert of een bestand een geldig audiobestand is
+    - Parameters: file (str of bytes), filename (str)
+    - Return: tuple (is_valid, error_message)
+    - Afhankelijkheden: Geen
+  - `convert_audio_to_wav(input_file)`: Converteert een audiobestand naar WAV-formaat
+    - Parameters: input_file (str)
+    - Return: str (pad naar het geconverteerde WAV-bestand)
+    - Afhankelijkheden: pydub
+  - `get_supported_audio_info()`: Geeft informatie over ondersteunde audioformaten
+    - Parameters: Geen
+    - Return: dict (ondersteunde extensies, MIME-types en maximale grootte)
     - Afhankelijkheden: Geen
 
 ## 4. Status
@@ -122,8 +147,6 @@ De applicatie is opgebouwd uit de volgende modules:
   - Transcriber module (Issue #3)
   - Integratie tests en bugfixes (Issue #4)
   - UI/UX verbeteringen (Issue #6)
-  
-- **In ontwikkeling**:
   - Upload functionaliteit voor bestaande audiobestanden (Issue #7)
   
 - **Nog te implementeren**:
@@ -132,8 +155,8 @@ De applicatie is opgebouwd uit de volgende modules:
   - Bewerkmogelijkheden voor transcripties
 
 ## 5. Volgende stappen
-1. Implementeren van upload functionaliteit voor bestaande audiobestanden (Issue #7)
-2. Uitbreiden van meertalenondersteuning voor transcriptie
-3. Toevoegen van configuratiescherm voor gebruikersinstellingen
-4. Implementeren van bewerkmogelijkheden voor transcripties
-5. Ondersteuning voor bestandsformaat conversie
+1. Uitbreiden van meertalenondersteuning voor transcriptie
+2. Toevoegen van configuratiescherm voor gebruikersinstellingen
+3. Implementeren van bewerkmogelijkheden voor transcripties
+4. Ondersteuning voor bestandsformaat conversie
+5. Toevoegen van een zoekfunctie voor transcripties
