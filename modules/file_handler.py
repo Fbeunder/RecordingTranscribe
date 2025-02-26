@@ -11,10 +11,23 @@ import os
 import time
 import logging
 import shutil
-from typing import Union, Optional
+import tempfile
+from typing import Union, Optional, List, Tuple, Dict
 
 # Configureer logger
 logger = logging.getLogger(__name__)
+
+# Constanten voor bestandsvalidatie
+SUPPORTED_AUDIO_EXTENSIONS = ['.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac']
+SUPPORTED_AUDIO_MIMETYPES = [
+    'audio/wav', 'audio/x-wav', 'audio/wave',
+    'audio/mpeg', 'audio/mp3',
+    'audio/mp4', 'audio/x-m4a',
+    'audio/flac', 'audio/x-flac',
+    'audio/ogg', 'application/ogg',
+    'audio/aac', 'audio/x-aac'
+]
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB als maximale uploadgrootte
 
 def get_download_folder() -> str:
     """
@@ -193,3 +206,134 @@ def load_file(filepath: str) -> Union[bytes, str]:
     except Exception as e:
         logger.error(f"Fout bij laden van bestand: {str(e)}")
         raise IOError(f"Kon bestand niet laden: {str(e)}")
+
+
+def validate_audio_file(file: Union[str, bytes], filename: str) -> Tuple[bool, Optional[str]]:
+    """
+    Valideert of een bestand een geldig en ondersteund audiobestand is.
+    
+    Args:
+        file (str of bytes): Bestandspad of bestandsinhoud
+        filename (str): Bestandsnaam (voor extensiecontrole)
+    
+    Returns:
+        Tuple[bool, Optional[str]]: (is_valid, error_message)
+    """
+    # Controleer de extensie
+    _, ext = os.path.splitext(filename.lower())
+    
+    if not ext:
+        return False, "Bestand heeft geen extensie"
+    
+    if ext not in SUPPORTED_AUDIO_EXTENSIONS:
+        return False, f"Bestandsextensie {ext} wordt niet ondersteund. Ondersteunde extensies: {', '.join(SUPPORTED_AUDIO_EXTENSIONS)}"
+    
+    # Als file een string is (pad), controleer bestandsgrootte
+    if isinstance(file, str):
+        if not os.path.exists(file):
+            return False, "Bestand bestaat niet"
+        
+        file_size = os.path.getsize(file)
+        if file_size > MAX_UPLOAD_SIZE:
+            max_size_mb = MAX_UPLOAD_SIZE / (1024 * 1024)
+            return False, f"Bestand is te groot ({file_size / (1024 * 1024):.2f} MB). Maximale grootte is {max_size_mb} MB"
+        
+        if file_size == 0:
+            return False, "Bestand is leeg"
+    
+    # Als file bytes zijn, controleer alleen de bestandsgrootte
+    elif isinstance(file, bytes):
+        if len(file) > MAX_UPLOAD_SIZE:
+            max_size_mb = MAX_UPLOAD_SIZE / (1024 * 1024)
+            return False, f"Bestand is te groot ({len(file) / (1024 * 1024):.2f} MB). Maximale grootte is {max_size_mb} MB"
+        
+        if len(file) == 0:
+            return False, "Bestand is leeg"
+    
+    # Bestand is geldig
+    return True, None
+
+
+def convert_audio_to_wav(input_file: str) -> str:
+    """
+    Converteert een audiobestand naar WAV-formaat (indien nodig).
+    
+    Args:
+        input_file (str): Pad naar het invoerbestand
+    
+    Returns:
+        str: Pad naar het geconverteerde WAV-bestand
+    
+    Raises:
+        ValueError: Als het bestand niet kan worden geconverteerd
+        IOError: Bij fouten in het converteren
+    """
+    # Als het bestand al een WAV-bestand is, return het pad
+    if input_file.lower().endswith('.wav'):
+        logger.info(f"Bestand is al in WAV-formaat: {input_file}")
+        return input_file
+    
+    try:
+        # We gebruiken pydub om de conversie uit te voeren
+        from pydub import AudioSegment
+        
+        # Bepaal het bestandsformaat op basis van de extensie
+        _, ext = os.path.splitext(input_file.lower())
+        ext = ext[1:]  # Verwijder de punt
+        
+        # Bepaal het uitvoerbestand en bestandsformaat
+        output_file = os.path.join(tempfile.gettempdir(), f"{os.path.basename(input_file)}.wav")
+        
+        # Laad het audiobestand met pydub (format is automatisch afgeleid van extensie)
+        logger.info(f"Start conversie van {ext} naar WAV: {input_file}")
+        
+        # MP3 naar WAV
+        if ext == 'mp3':
+            audio = AudioSegment.from_mp3(input_file)
+        # OGG naar WAV
+        elif ext == 'ogg':
+            audio = AudioSegment.from_ogg(input_file)
+        # FLAC naar WAV
+        elif ext == 'flac':
+            audio = AudioSegment.from_file(input_file, format="flac")
+        # AAC/M4A naar WAV
+        elif ext in ['aac', 'm4a']:
+            audio = AudioSegment.from_file(input_file, format=ext)
+        else:
+            # Generieke conversie voor niet-specifiek ondersteunde formaten
+            audio = AudioSegment.from_file(input_file)
+        
+        # Exporteer naar WAV
+        audio.export(output_file, format="wav")
+        
+        # Controleer of het bestand succesvol is aangemaakt
+        if not os.path.exists(output_file):
+            logger.error(f"Geconverteerd bestand kon niet worden aangemaakt: {output_file}")
+            raise IOError(f"Geconverteerd bestand kon niet worden aangemaakt: {output_file}")
+        
+        file_size = os.path.getsize(output_file)
+        logger.info(f"Bestand succesvol geconverteerd naar WAV: {output_file} ({file_size} bytes)")
+        
+        return output_file
+        
+    except ImportError as e:
+        logger.error(f"Bibliotheek voor audioconversie ontbreekt: {str(e)}")
+        raise ValueError(f"Kan bestand niet converteren: vereiste module ontbreekt ({str(e)})")
+    
+    except Exception as e:
+        logger.error(f"Fout bij converteren naar WAV: {str(e)}")
+        raise IOError(f"Kon bestand niet converteren naar WAV: {str(e)}")
+
+
+def get_supported_audio_info() -> Dict[str, List[str]]:
+    """
+    Geeft informatie over ondersteunde audioformaten.
+    
+    Returns:
+        Dict[str, List[str]]: Dictionary met ondersteunde extensies en MIME-types
+    """
+    return {
+        'extensions': SUPPORTED_AUDIO_EXTENSIONS,
+        'mime_types': SUPPORTED_AUDIO_MIMETYPES,
+        'max_size': MAX_UPLOAD_SIZE
+    }
