@@ -7,9 +7,12 @@ met behulp van de SpeechRecognition bibliotheek.
 """
 
 import os
+import logging
 import speech_recognition as sr
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
+# Configureer logger
+logger = logging.getLogger(__name__)
 
 def transcribe_audio(audio_file: str, language: str = 'nl-NL') -> str:
     """
@@ -26,14 +29,22 @@ def transcribe_audio(audio_file: str, language: str = 'nl-NL') -> str:
         
     Raises:
         FileNotFoundError: Als het audiobestand niet gevonden kan worden
-        ValueError: Als het audiobestand niet in een ondersteund formaat is
+        ValueError: Als het audiobestand niet in een ondersteund formaat is of als de taal niet ondersteund wordt
         Exception: Voor alle andere fouten tijdens transcriptie
     """
+    # Controleer of de opgegeven taal wordt ondersteund
+    supported = supported_languages()
+    if language not in supported:
+        logger.warning(f"Niet-ondersteunde taal opgegeven: {language}, terugvallen op nl-NL")
+        language = 'nl-NL'  # Terugvallen op Nederlands
+    
     if not os.path.exists(audio_file):
+        logger.error(f"Audiobestand niet gevonden: {audio_file}")
         raise FileNotFoundError(f"Audiobestand niet gevonden: {audio_file}")
     
     # Controleer of het bestand in WAV-formaat is
     if not audio_file.lower().endswith('.wav'):
+        logger.error(f"Niet-ondersteund bestandsformaat: {audio_file}")
         raise ValueError("Alleen WAV-bestanden worden ondersteund voor transcriptie")
     
     # Maak een nieuw recognizer object aan
@@ -51,17 +62,21 @@ def transcribe_audio(audio_file: str, language: str = 'nl-NL') -> str:
             audio_data = recognizer.record(source)
             
             # Probeer spraak te herkennen met Google Speech Recognition
-            # (goed voor zowel Nederlands als Engels)
+            logger.info(f"Start transcriptie met Google Speech Recognition in taal: {language}")
             text = recognizer.recognize_google(audio_data, language=language)
+            logger.info(f"Transcriptie succesvol: {len(text)} karakters")
             return text
     except sr.UnknownValueError:
         # Speech was niet begrijpbaar
+        logger.warning(f"Geen spraak herkend in bestand: {audio_file}")
         return "Kon geen spraak herkennen in de opname."
     except sr.RequestError as e:
         # API niet bereikbaar of gaf een fout
+        logger.error(f"Google Speech Recognition service niet bereikbaar: {str(e)}")
         raise Exception(f"Kon de spraakherkenningsdienst niet bereiken: {str(e)}")
     except Exception as e:
         # Andere fouten opvangen
+        logger.error(f"Fout tijdens transcriptie: {str(e)}")
         raise Exception(f"Fout tijdens transcriptie: {str(e)}")
 
 
@@ -78,6 +93,9 @@ def transcribe_with_options(audio_file: str, options: Dict[str, Any] = None) -> 
         
     Returns:
         Dict[str, Any]: Een dictionary met transcriptieresultaten en metadata
+        
+    Raises:
+        ValueError: Als het audiobestand niet in een ondersteund formaat is of als de taal niet ondersteund wordt
     """
     if options is None:
         options = {}
@@ -85,6 +103,12 @@ def transcribe_with_options(audio_file: str, options: Dict[str, Any] = None) -> 
     # Standaard opties
     language = options.get('language', 'nl-NL')
     engine = options.get('engine', 'google')
+    
+    # Controleer of de opgegeven taal wordt ondersteund
+    supported = supported_languages()
+    if language not in supported:
+        logger.warning(f"Niet-ondersteunde taal opgegeven: {language}, terugvallen op nl-NL")
+        language = 'nl-NL'  # Terugvallen op Nederlands
     
     # Initialize recognizer
     recognizer = sr.Recognizer()
@@ -98,6 +122,16 @@ def transcribe_with_options(audio_file: str, options: Dict[str, Any] = None) -> 
         'language': language
     }
     
+    # Controleer of het bestand bestaat
+    if not os.path.exists(audio_file):
+        result['error'] = f"Audiobestand niet gevonden: {audio_file}"
+        return result
+    
+    # Controleer of het bestand in WAV-formaat is
+    if not audio_file.lower().endswith('.wav'):
+        result['error'] = "Alleen WAV-bestanden worden ondersteund voor transcriptie"
+        return result
+    
     try:
         with sr.AudioFile(audio_file) as source:
             audio_data = recognizer.record(source)
@@ -108,23 +142,30 @@ def transcribe_with_options(audio_file: str, options: Dict[str, Any] = None) -> 
                 if language.startswith('nl'):
                     # Nederlands is niet standaard ondersteund door PocketSphinx,
                     # val terug op Google als dit beschikbaar is
+                    logger.info(f"PocketSphinx ondersteunt geen Nederlands, gebruik Google (fallback)")
                     result['text'] = recognizer.recognize_google(audio_data, language=language)
                     result['engine_used'] = 'google (fallback)'
                 else:
                     # Voor Engels kunnen we wel PocketSphinx gebruiken
+                    logger.info(f"Gebruik PocketSphinx voor transcriptie")
                     result['text'] = recognizer.recognize_sphinx(audio_data)
             else:
                 # Gebruik Google (default)
+                logger.info(f"Gebruik Google Speech Recognition voor transcriptie in taal: {language}")
                 result['text'] = recognizer.recognize_google(audio_data, language=language)
             
             # Als we hier komen is de transcriptie geslaagd
+            logger.info(f"Transcriptie succesvol met {result['engine_used']}: {len(result['text'])} karakters")
             result['success'] = True
             
     except sr.UnknownValueError:
+        logger.warning(f"Geen spraak herkend in bestand: {audio_file}")
         result['error'] = "Kon geen spraak herkennen in de opname"
     except sr.RequestError as e:
+        logger.error(f"Spraakherkenningsdienst niet bereikbaar: {str(e)}")
         result['error'] = f"Kon de spraakherkenningsdienst niet bereiken: {str(e)}"
     except Exception as e:
+        logger.error(f"Fout tijdens transcriptie: {str(e)}")
         result['error'] = f"Fout tijdens transcriptie: {str(e)}"
     
     return result
@@ -151,10 +192,14 @@ def save_transcription(text: str, filename: str) -> str:
         if not filename.lower().endswith('.txt'):
             filename = f"{filename}.txt"
         
+        logger.info(f"Opslaan van transcriptie als: {filename}")
+        
         # Sla het bestand op met de file_handler module
         file_path = save_file(text, filename)
+        logger.info(f"Transcriptie succesvol opgeslagen als: {file_path}")
         return file_path
     except Exception as e:
+        logger.error(f"Kon transcriptie niet opslaan: {str(e)}")
         raise Exception(f"Kon transcriptie niet opslaan: {str(e)}")
 
 
