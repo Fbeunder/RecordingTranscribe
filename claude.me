@@ -71,14 +71,22 @@ De applicatie is opgebouwd uit de volgende modules:
 ### modules/transcriber.py
 - **Functionaliteit**: Verzorgt de transcriptie van audiobestanden naar tekst
 - **Belangrijkste functies**:
-  - `transcribe_audio(audio_file)`: Transcribeert een audiobestand naar tekst
-    - Parameters: audio_file (str, pad naar het audiobestand)
+  - `transcribe_audio(audio_file, language)`: Transcribeert een audiobestand naar tekst
+    - Parameters: audio_file (str, pad naar het audiobestand), language (str, optioneel)
     - Return: str (getranscribeerde tekst)
+    - Afhankelijkheden: SpeechRecognition
+  - `transcribe_with_options(audio_file, options)`: Transcribeert met uitgebreide opties
+    - Parameters: audio_file (str), options (dict, optioneel)
+    - Return: dict (transcriptieresultaten en metadata)
     - Afhankelijkheden: SpeechRecognition
   - `save_transcription(text, filename)`: Slaat de transcriptie op als een tekstbestand
     - Parameters: text (str), filename (str)
     - Return: str (pad naar het opgeslagen bestand)
     - Afhankelijkheden: file_handler.py
+  - `supported_languages()`: Geeft een lijst van ondersteunde talen
+    - Parameters: Geen
+    - Return: dict (taalcodes en -namen)
+    - Afhankelijkheden: Geen
 
 ### modules/file_handler.py
 - **Functionaliteit**: Verzorgt het bestandsbeheer voor opnames en transcripties
@@ -88,7 +96,7 @@ De applicatie is opgebouwd uit de volgende modules:
     - Return: str (pad naar de download-map)
     - Afhankelijkheden: Geen
   - `save_file(data, filename, folder)`: Slaat data op als een bestand
-    - Parameters: data (bytes of str), filename (str), folder (str)
+    - Parameters: data (bytes of str), filename (str), folder (str, optioneel)
     - Return: str (volledig pad naar het opgeslagen bestand)
     - Afhankelijkheden: Geen
   - `load_file(filepath)`: Laadt een bestand van schijf
@@ -104,9 +112,10 @@ De applicatie is opgebouwd uit de volgende modules:
   - Recorder module (Issue #2)
   - File handler module
   - Transcriber module (Issue #3)
+  - Integratie tests (Issue #4 gedeeltelijk)
   
 - **In ontwikkeling**:
-  - Integratie testing
+  - Integratie testen en bugfixes (Issue #4)
   
 - **Nog te implementeren**:
   - Verbeteringen UI/UX
@@ -114,7 +123,7 @@ De applicatie is opgebouwd uit de volgende modules:
   - Upload functionaliteit voor bestaande audiobestanden
 
 ## 5. Volgende stappen
-1. Integratie testen en bugfixes
+1. Afronden van integratie testen en bugfixes (Issue #4)
 2. UI/UX verbeteringen
 3. Implementeren van meertalenondersteuning voor transcriptie
 4. Toevoegen van upload functionaliteit voor bestaande audiobestanden
