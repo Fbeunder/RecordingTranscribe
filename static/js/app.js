@@ -16,12 +16,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const recordingTimer = document.getElementById('recording-timer');
     const transcribeRecordingBtn = document.getElementById('transcribe-recording');
     const uploadAudio = document.getElementById('upload-audio');
+    const uploadProgress = document.getElementById('upload-progress');
+    const uploadProgressBar = uploadProgress.querySelector('.progress-bar');
+    const uploadFormats = document.getElementById('upload-formats');
     const transcribeUploadBtn = document.getElementById('transcribe-upload');
     const transcriptionResult = document.getElementById('transcription-result');
     const transcriptionProgress = document.getElementById('transcription-progress');
     const downloadAudioBtn = document.getElementById('download-audio');
     const downloadTranscriptionBtn = document.getElementById('download-transcription');
+    const previewAudioBtn = document.getElementById('preview-audio');
     const notificationArea = document.getElementById('notification-area');
+    const audioPlayer = document.getElementById('audio-player');
+    const audioSource = document.getElementById('audio-source');
+    const audioFilename = document.getElementById('audio-filename');
+    const audioPlayerModal = new bootstrap.Modal(document.getElementById('audio-player-modal'));
+    const queueModal = new bootstrap.Modal(document.getElementById('queue-modal'));
+    const queueTableBody = document.getElementById('queue-table-body');
+    const processAllQueueBtn = document.getElementById('process-all-queue');
     
     // Status variabelen
     let isRecording = false;
@@ -29,6 +40,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentTranscription = null;
     let recordingStartTime = null;
     let recordingTimerInterval = null;
+    let uploadQueue = [];
+    let supportedFormats = [];
     
     // Functie voor het weergeven van notificaties
     function showNotification(message, type = 'info', duration = 4000) {
@@ -60,7 +73,9 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => {
-                notificationArea.removeChild(toast);
+                if (toast.parentNode === notificationArea) {
+                    notificationArea.removeChild(toast);
+                }
             }, 500);
         }, duration);
         
@@ -131,6 +146,29 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Fout bij het ophalen van talen:', error);
             // Standaardtalen blijven behouden als fallback
+        }
+    }
+    
+    // Functie om ondersteunde audioformaten op te halen
+    async function loadAudioFormats() {
+        try {
+            const response = await fetch('/api/formats');
+            const data = await response.json();
+            
+            if (data.formats) {
+                supportedFormats = data.formats;
+                
+                // Update acceptattributen voor het upload element
+                const acceptFormats = supportedFormats.join(',');
+                uploadAudio.setAttribute('accept', acceptFormats);
+                
+                // Update het helptekst element
+                const formatsText = supportedFormats.map(format => format.toUpperCase().replace('.', '')).join(', ');
+                uploadFormats.textContent = `Ondersteunde formaten: ${formatsText} (max. ${data.max_size_formatted})`;
+            }
+        } catch (error) {
+            console.error('Fout bij het ophalen van audioformaten:', error);
+            // Standaardformaten blijven behouden als fallback
         }
     }
     
@@ -224,6 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 currentAudioFile = data.file_path;
                 downloadAudioBtn.disabled = false;
+                previewAudioBtn.disabled = false;
                 
                 showNotification(`Opname succesvol gestopt (${Math.round(data.file_size / 1024)} KB)`, 'success');
                 
@@ -295,6 +334,276 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
+    // Functie om bestand te uploaden
+    async function uploadAudioFile(file) {
+        try {
+            // Toon upload voortgang
+            uploadProgress.classList.remove('d-none');
+            uploadProgressBar.style.width = '0%';
+            transcribeUploadBtn.disabled = true;
+            
+            // Maak een FormData object voor het uploaden
+            const formData = new FormData();
+            formData.append('audio_file', file);
+            
+            // Implementeer upload met voortgangsindicatie
+            const xhr = new XMLHttpRequest();
+            
+            // Voortgangsevent
+            xhr.upload.addEventListener('progress', (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = Math.round((event.loaded / event.total) * 100);
+                    uploadProgressBar.style.width = percentComplete + '%';
+                    uploadProgressBar.setAttribute('aria-valuenow', percentComplete);
+                }
+            });
+            
+            // Promise om XHR request af te handelen
+            const uploadPromise = new Promise((resolve, reject) => {
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState === 4) {
+                        if (xhr.status === 200) {
+                            resolve(JSON.parse(xhr.responseText));
+                        } else {
+                            let errorData = {
+                                error: 'Fout bij uploaden',
+                                details: 'Onbekende fout'
+                            };
+                            
+                            try {
+                                errorData = JSON.parse(xhr.responseText);
+                            } catch (e) {
+                                // Als het niet als JSON kan worden geparsed, gebruik defaultwaarden
+                            }
+                            
+                            reject(errorData);
+                        }
+                    }
+                };
+            });
+            
+            // Open en verstuur het request
+            xhr.open('POST', '/api/upload', true);
+            xhr.send(formData);
+            
+            // Wacht op resultaat
+            const data = await uploadPromise;
+            
+            // Update UI na succesvolle upload
+            uploadProgress.classList.add('d-none');
+            
+            currentAudioFile = data.file_path;
+            downloadAudioBtn.disabled = false;
+            previewAudioBtn.disabled = false;
+            
+            // Toon bestandsnaam en grootte
+            const fileSizeKB = Math.round(data.file_size / 1024);
+            showNotification(`Bestand "${data.filename}" succesvol geüpload (${fileSizeKB} KB)`, 'success');
+            
+            // Vraag of gebruiker wil transcriberen
+            if (confirm('Wil je het geüploade bestand transcriberen?')) {
+                transcribeAudio(currentAudioFile);
+            }
+            
+            return data;
+            
+        } catch (error) {
+            // Bij fouten, herstel UI
+            uploadProgress.classList.add('d-none');
+            console.error('Fout bij uploaden van audio:', error);
+            showNotification(`Kon bestand niet uploaden: ${error.details || error.error || 'Onbekende fout'}`, 'error');
+            throw error;
+        }
+    }
+    
+    // Functie om bestand toe te voegen aan wachtrij
+    function addToQueue(file) {
+        const fileId = 'file-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        
+        const queueItem = {
+            id: fileId,
+            file: file,
+            status: 'pending', // pending, uploading, transcribing, completed, error
+            error: null,
+            filePath: null
+        };
+        
+        uploadQueue.push(queueItem);
+        
+        // Update wachtrij UI
+        updateQueueTable();
+        
+        return fileId;
+    }
+    
+    // Functie om wachtrij tabel bij te werken
+    function updateQueueTable() {
+        queueTableBody.innerHTML = '';
+        
+        if (uploadQueue.length === 0) {
+            queueTableBody.innerHTML = '<tr><td colspan="4" class="text-center">Geen bestanden in de wachtrij</td></tr>';
+            return;
+        }
+        
+        uploadQueue.forEach(item => {
+            const row = document.createElement('tr');
+            
+            // Status klasse bepalen
+            let statusClass = '';
+            let statusText = '';
+            
+            switch (item.status) {
+                case 'pending':
+                    statusClass = 'text-secondary';
+                    statusText = 'Wachtend';
+                    break;
+                case 'uploading':
+                    statusClass = 'text-primary';
+                    statusText = 'Uploaden...';
+                    break;
+                case 'transcribing':
+                    statusClass = 'text-info';
+                    statusText = 'Transcriberen...';
+                    break;
+                case 'completed':
+                    statusClass = 'text-success';
+                    statusText = 'Voltooid';
+                    break;
+                case 'error':
+                    statusClass = 'text-danger';
+                    statusText = `Fout: ${item.error || 'Onbekende fout'}`;
+                    break;
+            }
+            
+            // Bestandsgrootte
+            const fileSize = item.file.size / 1024; // KB
+            const fileSizeText = fileSize < 1024 
+                ? `${Math.round(fileSize)} KB` 
+                : `${(fileSize / 1024).toFixed(2)} MB`;
+            
+            // Rij opbouwen
+            row.innerHTML = `
+                <td>${item.file.name}</td>
+                <td>${fileSizeText}</td>
+                <td class="${statusClass}">${statusText}</td>
+                <td>
+                    ${item.status === 'pending' ? '<button class="btn btn-sm btn-primary process-queue-item">Verwerken</button>' : ''}
+                    ${item.status === 'error' ? '<button class="btn btn-sm btn-warning retry-queue-item">Opnieuw</button>' : ''}
+                    ${item.status === 'completed' ? '<button class="btn btn-sm btn-info preview-queue-item">Afspelen</button>' : ''}
+                    <button class="btn btn-sm btn-danger remove-queue-item">Verwijderen</button>
+                </td>
+            `;
+            
+            // Event listeners toevoegen
+            const processBtn = row.querySelector('.process-queue-item');
+            if (processBtn) {
+                processBtn.addEventListener('click', () => processQueueItem(item.id));
+            }
+            
+            const retryBtn = row.querySelector('.retry-queue-item');
+            if (retryBtn) {
+                retryBtn.addEventListener('click', () => processQueueItem(item.id));
+            }
+            
+            const previewBtn = row.querySelector('.preview-queue-item');
+            if (previewBtn) {
+                previewBtn.addEventListener('click', () => previewQueueItem(item.id));
+            }
+            
+            const removeBtn = row.querySelector('.remove-queue-item');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', () => removeFromQueue(item.id));
+            }
+            
+            queueTableBody.appendChild(row);
+        });
+    }
+    
+    // Functie om een item uit de wachtrij te verwerken
+    async function processQueueItem(id) {
+        const itemIndex = uploadQueue.findIndex(item => item.id === id);
+        if (itemIndex === -1) return;
+        
+        const item = uploadQueue[itemIndex];
+        
+        // Status bijwerken
+        item.status = 'uploading';
+        updateQueueTable();
+        
+        try {
+            // Uploaden
+            const uploadResult = await uploadAudioFile(item.file);
+            item.filePath = uploadResult.file_path;
+            
+            // Transcriberen
+            item.status = 'transcribing';
+            updateQueueTable();
+            
+            await transcribeAudio(item.filePath);
+            
+            // Voltooid
+            item.status = 'completed';
+            updateQueueTable();
+            
+        } catch (error) {
+            // Fout
+            item.status = 'error';
+            item.error = error.details || error.error || 'Onbekende fout';
+            updateQueueTable();
+        }
+    }
+    
+    // Functie om alle items in de wachtrij te verwerken
+    async function processAllQueueItems() {
+        const pendingItems = uploadQueue.filter(item => item.status === 'pending' || item.status === 'error');
+        
+        if (pendingItems.length === 0) {
+            showNotification('Geen wachtende bestanden om te verwerken', 'info');
+            return;
+        }
+        
+        for (const item of pendingItems) {
+            await processQueueItem(item.id);
+        }
+        
+        showNotification('Alle bestanden verwerkt', 'success');
+    }
+    
+    // Functie om een audio item uit de wachtrij af te spelen
+    function previewQueueItem(id) {
+        const item = uploadQueue.find(item => item.id === id);
+        if (!item || !item.filePath) return;
+        
+        playAudio(item.filePath, item.file.name);
+    }
+    
+    // Functie om een item uit de wachtrij te verwijderen
+    function removeFromQueue(id) {
+        const itemIndex = uploadQueue.findIndex(item => item.id === id);
+        if (itemIndex === -1) return;
+        
+        uploadQueue.splice(itemIndex, 1);
+        updateQueueTable();
+    }
+    
+    // Functie om audio af te spelen
+    function playAudio(filePath, fileName) {
+        // Update de audiospeler bron
+        audioSource.src = filePath;
+        audioPlayer.load();
+        
+        // Update de bestandsnaam
+        audioFilename.textContent = fileName || 'Audio';
+        
+        // Toon de modal
+        audioPlayerModal.show();
+        
+        // Start het afspelen als de audio geladen is
+        audioPlayer.addEventListener('canplay', () => {
+            audioPlayer.play();
+        }, { once: true });
+    }
+    
     // Functie om bestand te downloaden
     function downloadFile(filePath, fileType) {
         if (!filePath) {
@@ -314,15 +623,30 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Functie om een geüpload audiobestand te verwerken
     function handleFileUpload(event) {
-        const file = event.target.files[0];
-        if (!file) {
+        const files = event.target.files;
+        if (!files || files.length === 0) {
             transcribeUploadBtn.disabled = true;
             return;
         }
         
-        // Controleer of het een WAV-bestand is
-        if (file.type !== 'audio/wav' && !file.name.toLowerCase().endsWith('.wav')) {
-            showNotification('Alleen WAV-bestanden worden ondersteund.', 'warning');
+        // Voor meerdere bestanden, gebruik de wachtrij
+        if (files.length > 1) {
+            for (let i = 0; i < files.length; i++) {
+                addToQueue(files[i]);
+            }
+            
+            uploadAudio.value = ''; // Reset het upload veld
+            showNotification(`${files.length} bestanden toegevoegd aan de wachtrij`, 'info');
+            queueModal.show();
+            return;
+        }
+        
+        const file = files[0];
+        
+        // Controleer of het formaat wordt ondersteund
+        const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+        if (!supportedFormats.includes(fileExt) && supportedFormats.length > 0) {
+            showNotification(`Niet-ondersteund bestandsformaat: ${fileExt}. Ondersteunde formaten: ${supportedFormats.join(', ')}`, 'warning');
             transcribeUploadBtn.disabled = true;
             uploadAudio.value = '';
             return;
@@ -348,11 +672,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     transcribeUploadBtn.addEventListener('click', function() {
         if (uploadAudio.files.length > 0) {
-            const formData = new FormData();
-            formData.append('audio', uploadAudio.files[0]);
-            
-            // TODO: Implementeer het uploaden en transcriberen van een audiobestand
-            showNotification('Upload en transcriptie functionaliteit is nog niet geïmplementeerd.', 'info');
+            uploadAudioFile(uploadAudio.files[0]);
         } else {
             showNotification('Selecteer eerst een audiobestand om te uploaden.', 'warning');
         }
@@ -364,6 +684,23 @@ document.addEventListener('DOMContentLoaded', function() {
     
     downloadTranscriptionBtn.addEventListener('click', function() {
         downloadFile(currentTranscription, 'tekst');
+    });
+    
+    previewAudioBtn.addEventListener('click', function() {
+        if (currentAudioFile) {
+            // Bepaal bestandsnaam uit het pad
+            const fileName = currentAudioFile.split('/').pop();
+            playAudio(currentAudioFile, fileName);
+        } else {
+            showNotification('Geen audiobestand beschikbaar om af te spelen.', 'warning');
+        }
+    });
+    
+    processAllQueueBtn.addEventListener('click', processAllQueueItems);
+    
+    // Audiospeler event
+    audioPlayer.addEventListener('ended', function() {
+        showNotification('Audio afspelen voltooid', 'info');
     });
     
     // Validatie op form inputs
@@ -378,6 +715,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialisatie
     loadMicrophones();
     loadLanguages();
+    loadAudioFormats();
     
     // Initiële UI state
     startRecordingBtn.disabled = true;
@@ -386,4 +724,5 @@ document.addEventListener('DOMContentLoaded', function() {
     transcribeUploadBtn.disabled = true;
     downloadAudioBtn.disabled = true;
     downloadTranscriptionBtn.disabled = true;
+    previewAudioBtn.disabled = true;
 });
