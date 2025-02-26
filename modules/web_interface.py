@@ -8,12 +8,17 @@ tussen de gebruiker en de backend functionaliteit.
 """
 
 import os
+import json
 import logging
 import tempfile
-from flask import render_template, request, jsonify, send_file, current_app
+from flask import render_template, request, jsonify, send_file, current_app, session
 from werkzeug.utils import secure_filename
 from modules.recorder import list_audio_devices, start_recording, stop_recording, save_recording
-from modules.transcriber import transcribe_audio, save_transcription, supported_languages, get_supported_audio_formats
+from modules.transcriber import (
+    transcribe_audio, transcribe_with_options, save_transcription, 
+    supported_languages, get_language_groups, get_popular_languages,
+    get_supported_audio_formats
+)
 from modules.file_handler import get_download_folder, validate_audio_file, convert_audio_to_wav, get_supported_audio_info
 
 # Configureer logging
@@ -26,6 +31,10 @@ def init_app(app):
     Args:
         app: Flask app instance
     """
+    # Zorg ervoor dat Flask sessies kunnen worden gebruikt
+    app.config['SESSION_TYPE'] = 'filesystem'
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'RecordAndTranscribeApp2025!')
+    
     @app.route('/')
     def index():
         """Render the main page."""
@@ -254,6 +263,8 @@ def init_app(app):
             
             audio_file = data.get('audio_file')
             language = data.get('language', 'nl-NL')  # Default taal is Nederlands
+            use_advanced = data.get('advanced', False)  # Gebruik geavanceerde opties
+            detect_language = data.get('detect_language', language == 'auto')  # Automatische taaldetectie
             
             if not audio_file:
                 logger.warning("Geen audiobestand opgegeven voor transcriptie")
@@ -266,17 +277,68 @@ def init_app(app):
                     'details': f'Het bestand {audio_file} bestaat niet'
                 }), 404
             
-            # Controleer of taal ondersteund wordt
-            supported = supported_languages()
-            if language not in supported:
-                logger.warning(f"Niet-ondersteunde taal opgegeven: {language}")
-                return jsonify({
-                    'error': 'Niet-ondersteunde taal',
-                    'details': f'De taal {language} wordt niet ondersteund. Ondersteunde talen: {", ".join(supported.keys())}'
-                }), 400
+            # Controleer of taal ondersteund wordt, tenzij het 'auto' is
+            if language != 'auto':
+                supported = supported_languages()
+                if language not in supported:
+                    logger.warning(f"Niet-ondersteunde taal opgegeven: {language}")
+                    return jsonify({
+                        'error': 'Niet-ondersteunde taal',
+                        'details': f'De taal {language} wordt niet ondersteund. Ondersteunde talen: {", ".join(supported.keys())}'
+                    }), 400
             
             logger.info(f"Start transcriptie van: {audio_file} in taal: {language}")
-            text = transcribe_audio(audio_file, language)
+            
+            # Als de taal 'auto' is of geavanceerde opties worden gebruikt, gebruik dan transcribe_with_options
+            if use_advanced or language == 'auto' or detect_language:
+                options = {
+                    'language': language,
+                    'detect_language': detect_language,
+                    'engine': data.get('engine', 'google')
+                }
+                
+                result = transcribe_with_options(audio_file, options)
+                
+                if not result['success']:
+                    logger.warning(f"Transcriptie niet succesvol: {result['error']}")
+                    return jsonify({
+                        'warning': result['error'],
+                        'text': "Kon geen transcriptie maken.",
+                        'filename': os.path.basename(audio_file).replace('.wav', '.txt')
+                    }), 200
+                
+                text = result['text']
+                
+                # Voor gebruikersvoorkeuren bijhouden welke taal is gebruikt
+                if result['detected_language'] and session:
+                    if 'recent_languages' not in session:
+                        session['recent_languages'] = []
+                    
+                    # Voeg toe aan recente talen zonder duplicaten
+                    recent_languages = session['recent_languages']
+                    if result['detected_language'] not in recent_languages:
+                        recent_languages.append(result['detected_language'])
+                        # Houd maximaal 5 recente talen bij
+                        session['recent_languages'] = recent_languages[-5:]
+                
+                logger.info(f"Transcriptie succesvol met opties, gedetecteerde taal: {result.get('detected_language')}")
+            else:
+                # Gebruik de standaard transcriptie functie
+                text = transcribe_audio(audio_file, language)
+                
+                # Voor gebruikersvoorkeuren bijhouden
+                if session:
+                    if 'recent_languages' not in session:
+                        session['recent_languages'] = []
+                    
+                    # Voeg toe aan recente talen zonder duplicaten
+                    recent_languages = session['recent_languages']
+                    if language not in recent_languages:
+                        recent_languages.append(language)
+                        # Houd maximaal 5 recente talen bij
+                        session['recent_languages'] = recent_languages[-5:]
+                
+                logger.info(f"Transcriptie succesvol in taal: {language}")
             
             if text == "Kon geen spraak herkennen in de opname.":
                 logger.warning(f"Geen spraak herkend in: {audio_file}")
@@ -294,13 +356,24 @@ def init_app(app):
             file_path = save_transcription(text, transcription_filename)
             logger.info(f"Transcriptie opgeslagen als: {file_path}")
             
-            return jsonify({
+            response_data = {
                 'text': text,
                 'filename': os.path.basename(file_path),
                 'file_path': file_path,
                 'language': language,
                 'original_file': audio_file
-            })
+            }
+            
+            # Voeg extra data toe als geavanceerde opties zijn gebruikt
+            if use_advanced or language == 'auto' or detect_language:
+                response_data.update({
+                    'detected_language': result.get('detected_language'),
+                    'language_confidence': result.get('language_confidence'),
+                    'transcription_confidence': result.get('confidence')
+                })
+            
+            return jsonify(response_data)
+            
         except ValueError as e:
             logger.error(f"Validatiefout bij transcriptie: {str(e)}")
             return jsonify({
@@ -324,13 +397,102 @@ def init_app(app):
     def api_languages():
         """API endpoint om ondersteunde talen op te halen."""
         try:
-            languages = supported_languages()
-            logger.info(f"Ondersteunde talen opgehaald: {len(languages)}")
-            return jsonify({'languages': languages})
+            # Parameter om te bepalen of gegroepeerde of platte lijst moet worden teruggegeven
+            grouped = request.args.get('grouped', 'false').lower() == 'true'
+            popular_only = request.args.get('popular', 'false').lower() == 'true'
+            
+            if popular_only:
+                languages = get_popular_languages()
+                logger.info(f"Populaire talen opgehaald: {len(languages)}")
+                return jsonify({'languages': languages})
+            elif grouped:
+                language_groups = get_language_groups()
+                logger.info(f"Gegroepeerde talen opgehaald: {len(language_groups)} groepen")
+                return jsonify({'language_groups': language_groups})
+            else:
+                languages = supported_languages()
+                logger.info(f"Alle talen opgehaald: {len(languages)}")
+                return jsonify({'languages': languages})
         except Exception as e:
             logger.error(f"Fout bij ophalen talen: {str(e)}")
             return jsonify({
                 'error': 'Kon talen niet ophalen',
+                'details': str(e)
+            }), 500
+    
+    @app.route('/api/languages/recent', methods=['GET', 'POST'])
+    def api_recent_languages():
+        """API endpoint om recente talen op te halen of bij te werken."""
+        try:
+            if request.method == 'GET':
+                # Haal recente talen uit de sessie
+                recent_languages = session.get('recent_languages', []) if session else []
+                return jsonify({'recent_languages': recent_languages})
+            
+            elif request.method == 'POST':
+                # Update recente talen in de sessie
+                data = request.get_json()
+                if data and 'languages' in data and isinstance(data['languages'], list):
+                    session['recent_languages'] = data['languages'][-5:]  # Maximaal 5 bewaren
+                    return jsonify({'success': True})
+                else:
+                    return jsonify({'error': 'Ongeldige data voor recente talen'}), 400
+        except Exception as e:
+            logger.error(f"Fout bij ophalen/bijwerken recente talen: {str(e)}")
+            return jsonify({
+                'error': 'Kon recente talen niet verwerken',
+                'details': str(e)
+            }), 500
+    
+    @app.route('/api/languages/detect', methods=['POST'])
+    def api_detect_language():
+        """API endpoint om de taal van een audiobestand te detecteren."""
+        try:
+            data = request.get_json()
+            if data is None:
+                logger.warning("Geen JSON data ontvangen bij taaldetectie")
+                return jsonify({'error': 'Geen geldige JSON data ontvangen'}), 400
+            
+            audio_file = data.get('audio_file')
+            
+            if not audio_file:
+                logger.warning("Geen audiobestand opgegeven voor taaldetectie")
+                return jsonify({'error': 'Geen audiobestand opgegeven'}), 400
+            
+            if not os.path.exists(audio_file):
+                logger.error(f"Audiobestand niet gevonden: {audio_file}")
+                return jsonify({
+                    'error': 'Audiobestand niet gevonden',
+                    'details': f'Het bestand {audio_file} bestaat niet'
+                }), 404
+            
+            # Gebruik de geavanceerde opties met taaldetectie
+            result = transcribe_with_options(audio_file, {
+                'language': 'auto',
+                'detect_language': True
+            })
+            
+            if not result['success']:
+                logger.warning(f"Taaldetectie mislukt: {result['error']}")
+                return jsonify({
+                    'warning': result['error'],
+                    'detected': False
+                }), 200
+            
+            logger.info(f"Taal gedetecteerd: {result['detected_language']} (betrouwbaarheid: {result['language_confidence']})")
+            
+            return jsonify({
+                'detected': True,
+                'language': result['detected_language'],
+                'language_name': supported_languages().get(result['detected_language'], 'Onbekend'),
+                'confidence': result['language_confidence'],
+                'sample_text': result['text'][:100] + ('...' if len(result['text']) > 100 else '')
+            })
+            
+        except Exception as e:
+            logger.error(f"Fout bij taaldetectie: {str(e)}")
+            return jsonify({
+                'error': 'Kon taal niet detecteren',
                 'details': str(e)
             }), 500
     
