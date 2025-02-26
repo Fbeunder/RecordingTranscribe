@@ -81,13 +81,17 @@
                         </div>
                         
                         <div class="mb-3">
+                            <label for="upload-audio" class="form-label">Upload een audiobestand</label>
                             <div class="input-group">
-                                <input type="file" class="form-control" id="upload-audio" accept="audio/wav">
+                                <input type="file" class="form-control" id="upload-audio" accept=".wav,.mp3,.m4a,.flac,.ogg,.aac">
                                 <button id="transcribe-upload" class="btn btn-outline-success" disabled>
-                                    <i class="fas fa-upload me-1"></i>Transcriberen
+                                    <i class="fas fa-upload me-1"></i>Uploaden & Transcriberen
                                 </button>
                             </div>
-                            <div class="form-text">Upload een .wav bestand om te transcriberen</div>
+                            <div class="form-text" id="upload-formats">Ondersteunde formaten: WAV, MP3, M4A, FLAC, OGG, AAC</div>
+                            <div id="upload-progress" class="progress mt-2 d-none">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                            </div>
                         </div>
                         
                         <div id="transcription-container" class="p-3 bg-light rounded mb-3" style="min-height: 150px; max-height: 250px; overflow-y: auto;">
@@ -100,14 +104,72 @@
                             <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
                         </div>
                         
-                        <div class="d-flex justify-content-between">
+                        <div class="d-flex justify-content-between gap-2">
                             <button id="download-audio" class="btn btn-outline-primary" disabled>
                                 <i class="fas fa-download me-1"></i>Download audio
                             </button>
                             <button id="download-transcription" class="btn btn-outline-success" disabled>
                                 <i class="fas fa-file-download me-1"></i>Download tekst
                             </button>
+                            <button id="preview-audio" class="btn btn-outline-info" disabled>
+                                <i class="fas fa-play me-1"></i>Afspelen
+                            </button>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Audiospeler modal -->
+        <div class="modal fade" id="audio-player-modal" tabindex="-1" aria-labelledby="audioPlayerModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="audioPlayerModalLabel">Audio afspelen</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Sluiten"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <audio id="audio-player" controls class="w-100 mb-3">
+                            <source id="audio-source" src="" type="audio/wav">
+                            Uw browser ondersteunt het audio element niet.
+                        </audio>
+                        <p id="audio-filename" class="mb-0"></p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bestandsqueue modal -->
+        <div class="modal fade" id="queue-modal" tabindex="-1" aria-labelledby="queueModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="queueModalLabel">Wachtrij bestanden</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Sluiten"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Bestandsnaam</th>
+                                        <th>Grootte</th>
+                                        <th>Status</th>
+                                        <th>Acties</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="queue-table-body">
+                                    <!-- Bestanden worden hier dynamisch toegevoegd -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" id="process-all-queue">Alles verwerken</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>
                     </div>
                 </div>
             </div>
