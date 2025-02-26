@@ -10,6 +10,7 @@ import os
 import logging
 import speech_recognition as sr
 from typing import Optional, Dict, Any, List
+from modules.file_handler import convert_audio_to_wav
 
 # Configureer logger
 logger = logging.getLogger(__name__)
@@ -42,22 +43,26 @@ def transcribe_audio(audio_file: str, language: str = 'nl-NL') -> str:
         logger.error(f"Audiobestand niet gevonden: {audio_file}")
         raise FileNotFoundError(f"Audiobestand niet gevonden: {audio_file}")
     
-    # Controleer of het bestand in WAV-formaat is
-    if not audio_file.lower().endswith('.wav'):
-        logger.error(f"Niet-ondersteund bestandsformaat: {audio_file}")
-        raise ValueError("Alleen WAV-bestanden worden ondersteund voor transcriptie")
-    
-    # Maak een nieuw recognizer object aan
-    recognizer = sr.Recognizer()
-    
-    # Configuratie voor betere spraakherkenning
-    recognizer.energy_threshold = 300  # Minimum audio-energie om spraak te detecteren
-    recognizer.dynamic_energy_threshold = True
-    recognizer.pause_threshold = 0.8  # Seconden stilte voordat een zin als compleet wordt beschouwd
-    
+    # Controleer of het bestand een ondersteund formaat heeft en converteer indien nodig
     try:
+        # Als het geen WAV-bestand is, converteer het naar WAV
+        if not audio_file.lower().endswith('.wav'):
+            logger.info(f"Converteer niet-WAV bestand naar WAV: {audio_file}")
+            wav_file = convert_audio_to_wav(audio_file)
+            logger.info(f"Bestand geconverteerd naar WAV: {wav_file}")
+        else:
+            wav_file = audio_file
+        
+        # Maak een nieuw recognizer object aan
+        recognizer = sr.Recognizer()
+        
+        # Configuratie voor betere spraakherkenning
+        recognizer.energy_threshold = 300  # Minimum audio-energie om spraak te detecteren
+        recognizer.dynamic_energy_threshold = True
+        recognizer.pause_threshold = 0.8  # Seconden stilte voordat een zin als compleet wordt beschouwd
+        
         # Open het audiobestand
-        with sr.AudioFile(audio_file) as source:
+        with sr.AudioFile(wav_file) as source:
             # Pas noise reduction toe voor betere herkenning
             audio_data = recognizer.record(source)
             
@@ -65,6 +70,16 @@ def transcribe_audio(audio_file: str, language: str = 'nl-NL') -> str:
             logger.info(f"Start transcriptie met Google Speech Recognition in taal: {language}")
             text = recognizer.recognize_google(audio_data, language=language)
             logger.info(f"Transcriptie succesvol: {len(text)} karakters")
+            
+            # Als het bestand is geconverteerd en niet het originele bestand is, 
+            # verwijder het tijdelijke bestand
+            if wav_file != audio_file and os.path.exists(wav_file):
+                try:
+                    os.remove(wav_file)
+                    logger.info(f"Tijdelijk WAV-bestand verwijderd: {wav_file}")
+                except Exception as e:
+                    logger.warning(f"Kon tijdelijk WAV-bestand niet verwijderen: {str(e)}")
+            
             return text
     except sr.UnknownValueError:
         # Speech was niet begrijpbaar
@@ -74,6 +89,10 @@ def transcribe_audio(audio_file: str, language: str = 'nl-NL') -> str:
         # API niet bereikbaar of gaf een fout
         logger.error(f"Google Speech Recognition service niet bereikbaar: {str(e)}")
         raise Exception(f"Kon de spraakherkenningsdienst niet bereiken: {str(e)}")
+    except ValueError as e:
+        # Probleem met validatie of conversie
+        logger.error(f"Validatie of conversie fout: {str(e)}")
+        raise ValueError(f"Probleem met audiobestand: {str(e)}")
     except Exception as e:
         # Andere fouten opvangen
         logger.error(f"Fout tijdens transcriptie: {str(e)}")
@@ -119,7 +138,9 @@ def transcribe_with_options(audio_file: str, options: Dict[str, Any] = None) -> 
         'confidence': 0.0,
         'error': None,
         'engine_used': engine,
-        'language': language
+        'language': language,
+        'original_file': audio_file,
+        'converted': False
     }
     
     # Controleer of het bestand bestaat
@@ -127,13 +148,18 @@ def transcribe_with_options(audio_file: str, options: Dict[str, Any] = None) -> 
         result['error'] = f"Audiobestand niet gevonden: {audio_file}"
         return result
     
-    # Controleer of het bestand in WAV-formaat is
-    if not audio_file.lower().endswith('.wav'):
-        result['error'] = "Alleen WAV-bestanden worden ondersteund voor transcriptie"
-        return result
-    
+    # Converteer het bestand indien nodig
     try:
-        with sr.AudioFile(audio_file) as source:
+        # Als het geen WAV-bestand is, converteer het naar WAV
+        if not audio_file.lower().endswith('.wav'):
+            logger.info(f"Converteer niet-WAV bestand naar WAV voor geavanceerde transcriptie: {audio_file}")
+            wav_file = convert_audio_to_wav(audio_file)
+            logger.info(f"Bestand geconverteerd naar WAV: {wav_file}")
+            result['converted'] = True
+        else:
+            wav_file = audio_file
+        
+        with sr.AudioFile(wav_file) as source:
             audio_data = recognizer.record(source)
             
             # Kies de juiste engine op basis van de options
@@ -158,12 +184,23 @@ def transcribe_with_options(audio_file: str, options: Dict[str, Any] = None) -> 
             logger.info(f"Transcriptie succesvol met {result['engine_used']}: {len(result['text'])} karakters")
             result['success'] = True
             
+            # Schoon tijdelijke bestanden op
+            if result['converted'] and wav_file != audio_file and os.path.exists(wav_file):
+                try:
+                    os.remove(wav_file)
+                    logger.info(f"Tijdelijk WAV-bestand verwijderd: {wav_file}")
+                except Exception as e:
+                    logger.warning(f"Kon tijdelijk WAV-bestand niet verwijderen: {str(e)}")
+            
     except sr.UnknownValueError:
         logger.warning(f"Geen spraak herkend in bestand: {audio_file}")
         result['error'] = "Kon geen spraak herkennen in de opname"
     except sr.RequestError as e:
         logger.error(f"Spraakherkenningsdienst niet bereikbaar: {str(e)}")
         result['error'] = f"Kon de spraakherkenningsdienst niet bereiken: {str(e)}"
+    except ValueError as e:
+        logger.error(f"Validatie of conversie fout: {str(e)}")
+        result['error'] = f"Probleem met audiobestand: {str(e)}"
     except Exception as e:
         logger.error(f"Fout tijdens transcriptie: {str(e)}")
         result['error'] = f"Fout tijdens transcriptie: {str(e)}"
@@ -216,5 +253,23 @@ def supported_languages() -> Dict[str, str]:
         'en-GB': 'Engels (VK)',
         'de-DE': 'Duits',
         'fr-FR': 'Frans',
-        'es-ES': 'Spaans'
+        'es-ES': 'Spaans',
+        'it-IT': 'Italiaans',
+        'pt-PT': 'Portugees (Portugal)',
+        'pt-BR': 'Portugees (Brazilië)',
+        'ru-RU': 'Russisch',
+        'ja-JP': 'Japans',
+        'zh-CN': 'Chinees (Vereenvoudigd)',
+        'ko-KR': 'Koreaans'
     }
+
+
+def get_supported_audio_formats() -> List[str]:
+    """
+    Geeft een lijst van ondersteunde audioformaten voor transcriptie.
+    
+    Returns:
+        List[str]: Lijst met ondersteunde bestandsextensies
+    """
+    from modules.file_handler import SUPPORTED_AUDIO_EXTENSIONS
+    return SUPPORTED_AUDIO_EXTENSIONS
