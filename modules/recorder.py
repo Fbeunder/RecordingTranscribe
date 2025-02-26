@@ -13,8 +13,12 @@ import io
 import threading
 import time
 import os
+import logging
 from typing import List, Dict, Tuple, Optional, Any
 from modules.file_handler import save_file
+
+# Configureer logger
+logger = logging.getLogger(__name__)
 
 # Globale variabelen voor de opname status
 _recording = False
@@ -35,32 +39,47 @@ def list_audio_devices() -> List[Dict[str, Any]]:
     Returns:
         List[Dict[str, Any]]: Een lijst van audio-apparaten met hun eigenschappen
     """
-    p = pyaudio.PyAudio()
-    devices = []
+    logger.info("Ophalen van beschikbare audio-apparaten")
     
-    # Itereer over alle beschikbare apparaten
-    for i in range(p.get_device_count()):
-        device_info = p.get_device_info_by_index(i)
+    try:
+        p = pyaudio.PyAudio()
+        devices = []
         
-        # Alleen input devices toevoegen (apparaten met min. 1 input kanaal)
-        if device_info.get('maxInputChannels', 0) > 0:
+        # Itereer over alle beschikbare apparaten
+        for i in range(p.get_device_count()):
+            device_info = p.get_device_info_by_index(i)
+            
+            # Alleen input devices toevoegen (apparaten met min. 1 input kanaal)
+            if device_info.get('maxInputChannels', 0) > 0:
+                devices.append({
+                    'id': i,
+                    'name': device_info.get('name', f'Device {i}'),
+                    'channels': device_info.get('maxInputChannels', 1)
+                })
+        
+        p.terminate()
+        
+        logger.info(f"Gevonden audio-apparaten: {len(devices)}")
+        
+        # Als er geen apparaten zijn gevonden, voeg een standaard apparaat toe
+        if not devices:
+            logger.warning("Geen apparaten gevonden, gebruik standaard apparaat")
             devices.append({
-                'id': i,
-                'name': device_info.get('name', f'Device {i}'),
-                'channels': device_info.get('maxInputChannels', 1)
+                'id': 0,
+                'name': 'Default Microphone',
+                'channels': 1
             })
+        
+        return devices
     
-    p.terminate()
-    
-    # Als er geen apparaten zijn gevonden, voeg een standaard apparaat toe
-    if not devices:
-        devices.append({
+    except Exception as e:
+        logger.error(f"Fout bij ophalen audio-apparaten: {str(e)}")
+        # Fallback met standaard apparaat bij fout
+        return [{
             'id': 0,
             'name': 'Default Microphone',
             'channels': 1
-        })
-    
-    return devices
+        }]
 
 
 def _record_audio():
@@ -70,6 +89,7 @@ def _record_audio():
     global _recording, _audio_frames, _stream
     
     _audio_frames = []
+    logger.debug("Start opname thread")
     
     while _recording:
         if _stream:
@@ -77,7 +97,9 @@ def _record_audio():
                 data = _stream.read(_chunk, exception_on_overflow=False)
                 _audio_frames.append(data)
             except Exception as e:
-                print(f"Fout bij het opnemen: {e}")
+                logger.error(f"Fout bij opnemen audio frame: {str(e)}")
+                # Stop de opname bij een fout
+                _recording = False
                 break
 
 
@@ -93,8 +115,11 @@ def start_recording(device_id: int) -> bool:
     """
     global _recording, _audio, _stream, _record_thread
     
+    logger.info(f"Start opname met apparaat ID: {device_id}")
+    
     # Stop eventuele bestaande opname
     if _recording:
+        logger.info("Er loopt al een opname, deze wordt eerst gestopt")
         stop_recording()
     
     # Reset opname status
@@ -102,10 +127,19 @@ def start_recording(device_id: int) -> bool:
     _audio_frames.clear()
     
     try:
+        # Controleer of het apparaat-ID geldig is
+        devices = list_audio_devices()
+        valid_device_ids = [device['id'] for device in devices]
+        
+        if device_id not in valid_device_ids:
+            logger.warning(f"Apparaat ID {device_id} niet gevonden, gebruik standaard apparaat (0)")
+            device_id = 0  # Fallback naar standaard apparaat
+        
         # Initialiseer PyAudio
         _audio = pyaudio.PyAudio()
         
         # Open audio stream
+        logger.debug(f"Open audio stream met apparaat {device_id}, samplerate: {_sample_rate}, channels: {_channels}")
         _stream = _audio.open(
             format=_format,
             channels=_channels,
@@ -120,18 +154,25 @@ def start_recording(device_id: int) -> bool:
         _record_thread.daemon = True
         _record_thread.start()
         
+        logger.info("Opname succesvol gestart")
         return True
     except Exception as e:
-        print(f"Fout bij het starten van de opname: {e}")
+        logger.error(f"Fout bij het starten van de opname: {str(e)}")
         _recording = False
         
         # Cleanup
         if _stream:
-            _stream.stop_stream()
-            _stream.close()
+            try:
+                _stream.stop_stream()
+                _stream.close()
+            except Exception as cleanup_error:
+                logger.error(f"Fout bij cleanup van stream: {str(cleanup_error)}")
         
         if _audio:
-            _audio.terminate()
+            try:
+                _audio.terminate()
+            except Exception as cleanup_error:
+                logger.error(f"Fout bij cleanup van PyAudio: {str(cleanup_error)}")
         
         _stream = None
         _audio = None
@@ -149,43 +190,68 @@ def stop_recording() -> bytes:
     global _recording, _audio_frames, _stream, _audio, _record_thread
     
     if not _recording:
+        logger.warning("Er is geen actieve opname om te stoppen")
         return b""
+    
+    logger.info("Stop opname")
     
     # Stop opname
     _recording = False
     
     # Wacht op de opname thread
     if _record_thread and _record_thread.is_alive():
+        logger.debug("Wacht op opname thread om te stoppen")
         _record_thread.join(timeout=1.0)
+        if _record_thread.is_alive():
+            logger.warning("Opname thread reageert niet, forceer stoppen")
     
     # Sluit stream en PyAudio
     if _stream:
-        _stream.stop_stream()
-        _stream.close()
-        _stream = None
+        try:
+            logger.debug("Stop en sluit audio stream")
+            _stream.stop_stream()
+            _stream.close()
+            _stream = None
+        except Exception as e:
+            logger.error(f"Fout bij sluiten van audio stream: {str(e)}")
     
     if _audio:
-        _audio.terminate()
-        _audio = None
+        try:
+            logger.debug("Beëindig PyAudio")
+            _audio.terminate()
+            _audio = None
+        except Exception as e:
+            logger.error(f"Fout bij beëindigen van PyAudio: {str(e)}")
     
-    # Converteer frames naar WAV
+    # Controleer of er frames zijn opgenomen
     if not _audio_frames:
+        logger.warning("Geen audio frames opgenomen")
         return b""
     
-    # Creëer een in-memory file-like object
-    wav_buffer = io.BytesIO()
+    # Log aantal opgenomen frames
+    logger.info(f"Aantal opgenomen audio frames: {len(_audio_frames)}")
     
-    with wave.open(wav_buffer, 'wb') as wf:
-        wf.setnchannels(_channels)
-        wf.setsampwidth(pyaudio.get_sample_size(_format))
-        wf.setframerate(_sample_rate)
-        wf.writeframes(b''.join(_audio_frames))
-    
-    # Reset audio frames en geef bytes terug
-    audio_data = wav_buffer.getvalue()
-    _audio_frames = []
-    
-    return audio_data
+    try:
+        # Creëer een in-memory file-like object
+        wav_buffer = io.BytesIO()
+        
+        with wave.open(wav_buffer, 'wb') as wf:
+            wf.setnchannels(_channels)
+            wf.setsampwidth(pyaudio.get_sample_size(_format))
+            wf.setframerate(_sample_rate)
+            wf.writeframes(b''.join(_audio_frames))
+        
+        # Reset audio frames en geef bytes terug
+        audio_data = wav_buffer.getvalue()
+        frames_count = len(_audio_frames)
+        _audio_frames = []
+        
+        logger.info(f"Opname succesvol gestopt, {len(audio_data)} bytes audio data")
+        return audio_data
+    except Exception as e:
+        logger.error(f"Fout bij verwerken van audio data: {str(e)}")
+        _audio_frames = []
+        return b""
 
 
 def save_recording(audio_data: bytes, filename: str) -> str:
@@ -198,10 +264,33 @@ def save_recording(audio_data: bytes, filename: str) -> str:
         
     Returns:
         str: Pad naar het opgeslagen bestand
+        
+    Raises:
+        ValueError: Als audio_data leeg is
+        IOError: Bij fouten in het schrijven naar schijf
     """
+    # Controleer of er data is om op te slaan
+    if not audio_data or len(audio_data) == 0:
+        logger.error("Geen audio data om op te slaan")
+        raise ValueError("Geen audio data om op te slaan")
+    
     # Zorg ervoor dat de bestandsnaam eindigt op .wav
     if not filename.lower().endswith('.wav'):
+        logger.debug(f"Bestandsnaam {filename} heeft geen .wav extensie, wordt toegevoegd")
         filename += '.wav'
     
-    # Gebruik de file_handler module om het bestand op te slaan
-    return save_file(audio_data, filename)
+    try:
+        # Gebruik de file_handler module om het bestand op te slaan
+        logger.info(f"Opslaan van audio bestand: {filename} ({len(audio_data)} bytes)")
+        file_path = save_file(audio_data, filename)
+        
+        # Controleer of het bestand succesvol is aangemaakt
+        if not os.path.exists(file_path):
+            logger.error(f"Bestand is niet aangemaakt: {file_path}")
+            raise IOError(f"Bestand kon niet worden aangemaakt: {file_path}")
+        
+        logger.info(f"Audio succesvol opgeslagen als: {file_path}")
+        return file_path
+    except Exception as e:
+        logger.error(f"Fout bij opslaan van audio: {str(e)}")
+        raise IOError(f"Fout bij opslaan van audio: {str(e)}")
