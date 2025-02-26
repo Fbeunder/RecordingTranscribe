@@ -1,0 +1,92 @@
+# Record en Transcribe App
+
+## 1. Projectoverzicht
+Een Python- en webapplicatie waarmee gebruikers gesprekken kunnen opnemen via een microfoon en deze kunnen omzetten naar geschreven tekst (transcriptie). De applicatie biedt een web-GUI waarin de gebruiker een microfoon kan selecteren, opnames kan starten en stoppen, en vervolgens kan kiezen of de opname direct getranscribeerd moet worden.
+
+## 2. Architectuur
+De applicatie is opgebouwd uit de volgende modules:
+- Web interface (Flask)
+- Audio opname module
+- Transcriptie module
+- Bestandsbeheer module
+
+## 3. Modules
+
+### app.py
+- **Functionaliteit**: Hoofdbestand dat de applicatie start en initialiseert
+- **Belangrijkste functies**:
+  - `main()`: Start de Flask webserver en initialiseert de benodigde modules
+    - Parameters: Geen
+    - Return: Void
+    - Afhankelijkheden: Alle andere modules
+
+### modules/web_interface.py
+- **Functionaliteit**: Verzorgt de web-GUI en API-endpoints
+- **Belangrijkste functies**:
+  - `init_app(app)`: Initialiseert de Flask routes en API endpoints
+    - Parameters: app (Flask app instance)
+    - Return: Void
+    - Afhankelijkheden: Flask
+  - `get_available_devices()`: Haalt beschikbare audio input-apparaten op
+    - Parameters: Geen
+    - Return: List (lijst met beschikbare audioapparaten)
+    - Afhankelijkheden: recorder.py
+
+### modules/recorder.py
+- **Functionaliteit**: Verzorgt het opnemen van audio via de microfoon
+- **Belangrijkste functies**:
+  - `list_audio_devices()`: Geeft een lijst van beschikbare audio input-apparaten
+    - Parameters: Geen
+    - Return: List (lijst met beschikbare audioapparaten)
+    - Afhankelijkheden: PyAudio
+  - `start_recording(device_id)`: Start een opname met het gekozen apparaat
+    - Parameters: device_id (int, ID van het gekozen audioapparaat)
+    - Return: Bool (True als het starten is gelukt)
+    - Afhankelijkheden: PyAudio
+  - `stop_recording()`: Stopt de huidige opname
+    - Parameters: Geen
+    - Return: Bytes (audio data in bytes)
+    - Afhankelijkheden: PyAudio
+  - `save_recording(audio_data, filename)`: Slaat de opname op als een audiobestand
+    - Parameters: audio_data (bytes), filename (str)
+    - Return: str (pad naar het opgeslagen bestand)
+    - Afhankelijkheden: file_handler.py
+
+### modules/transcriber.py
+- **Functionaliteit**: Verzorgt de transcriptie van audiobestanden naar tekst
+- **Belangrijkste functies**:
+  - `transcribe_audio(audio_file)`: Transcribeert een audiobestand naar tekst
+    - Parameters: audio_file (str, pad naar het audiobestand)
+    - Return: str (getranscribeerde tekst)
+    - Afhankelijkheden: SpeechRecognition
+  - `save_transcription(text, filename)`: Slaat de transcriptie op als een tekstbestand
+    - Parameters: text (str), filename (str)
+    - Return: str (pad naar het opgeslagen bestand)
+    - Afhankelijkheden: file_handler.py
+
+### modules/file_handler.py
+- **Functionaliteit**: Verzorgt het bestandsbeheer voor opnames en transcripties
+- **Belangrijkste functies**:
+  - `get_download_folder()`: Bepaalt de standaard download-map van de browser
+    - Parameters: Geen
+    - Return: str (pad naar de download-map)
+    - Afhankelijkheden: Geen
+  - `save_file(data, filename, folder)`: Slaat data op als een bestand
+    - Parameters: data (bytes of str), filename (str), folder (str)
+    - Return: str (volledig pad naar het opgeslagen bestand)
+    - Afhankelijkheden: Geen
+  - `load_file(filepath)`: Laadt een bestand van schijf
+    - Parameters: filepath (str)
+    - Return: bytes of str (inhoud van het bestand)
+    - Afhankelijkheden: Geen
+
+## 4. Status
+- Alle modules moeten nog geïmplementeerd worden
+
+## 5. Volgende stappen
+1. Opzetten van de basis project structuur
+2. Implementeren van de recorder module
+3. Implementeren van de transcriber module
+4. Implementeren van de file_handler module
+5. Ontwikkelen van de web interface
+6. Integratie testen en bugfixes
